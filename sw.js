@@ -1,6 +1,6 @@
-/* AromaLab 1.2 - cache first for static resources, network-first for the app page.
+/* AromaLab 1.3 - cache first for static resources, network-first for the app page.
    Scoped to the repository directory. Does not cache third-party content. */
-const CACHE_NAME = 'aromalab-pwa-v1.2.0';
+const CACHE_NAME = 'aromalab-pwa-v1.3.0';
 const PRECACHE = [
   './',
   './index.html',
