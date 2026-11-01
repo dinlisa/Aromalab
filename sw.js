@@ -1,9 +1,10 @@
-/* AromaLab 1.3.2 - cache first for static resources, network-first for the app page.
+/* AromaLab 1.3.3 - cache first for static resources, network-first for the app page.
    Scoped to the repository directory. Does not cache third-party content. */
-const CACHE_NAME = 'aromalab-pwa-v1.3.2';
+const CACHE_NAME = 'aromalab-pwa-v1.3.3';
 const PRECACHE = [
   './',
   './index.html',
+  './config.js',
   './manifest.webmanifest',
   './icon.svg',
   './icon-192.png',
@@ -32,6 +33,26 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin || !url.pathname.startsWith(self.registration.scope ? new URL(self.registration.scope).pathname : new URL('./',self.location.href).pathname)) return;
+
+  // La configuration cloud doit être relue sur GitHub après modification :
+  // cache-first bloquerait la création des comptes après activation.
+  if (url.pathname.endsWith('/config.js')) {
+    event.respondWith((async () => {
+      try {
+        const fresh = await fetch(request, { cache: 'no-store' });
+        if (fresh.ok) {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(request, fresh.clone());
+        }
+        return fresh;
+      } catch (_) {
+        return (await caches.match(request)) || new Response('window.AROMALAB_CLOUD_CONFIG={url:"",publishableKey:""};', {
+          headers: { 'Content-Type': 'application/javascript; charset=utf-8' }
+        });
+      }
+    })());
+    return;
+  }
 
   if (request.mode === 'navigate') {
     event.respondWith((async () => {

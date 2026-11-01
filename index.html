@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="theme-color" content="#193f32"><meta name="description" content="AromaLab : 60 fiches et 209 questions scientifiques, quiz thématiques, historique des parties et révision des réponses."><link rel="manifest" href="./manifest.webmanifest">
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="theme-color" content="#193f32"><meta name="description" content="AromaLab : 60 arômes, quiz scientifiques, historique et synchronisation des XP avec un compte."><link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2532,7 +2532,25 @@ img {
 .quiz-revisit-stat{font-size:12px;color:#375641;font-weight:700;margin:10px 0 0}
 .history-legend{font-size:12px;color:var(--muted);line-height:1.6;margin-top:14px}
 @media(max-width:600px){.history-card-top{align-items:flex-start;padding:13px}.history-card h3{font-size:14px}.history-score{font-size:20px}.history-details{padding:12px}.history-banner{padding:13px}.history-detail-button{margin:0 13px 13px}}
-</style></head><body><div id="app"><p style="font:16px system-ui;text-align:center;margin-top:25vh;color:#214b3a">AromaLab se prépare…</p></div><script>
+
+/* AromaLab 1.3.3 — comptes et sauvegarde */
+.account-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:22px}
+.account-panel{padding:25px;border-radius:22px;margin-top:15px}
+.account-panel h2{font:700 25px Georgia,serif;margin:0 0 10px;color:#214b3a}
+.account-panel p{color:#647365;line-height:1.65}
+.account-panel form{display:grid;gap:14px;margin-top:16px}
+.account-panel label{display:grid;gap:6px;font-weight:650;color:#284c3c;font-size:13px}
+.account-panel input{width:100%;border:1px solid #c9d7cc;border-radius:11px;padding:13px 12px;background:white;color:#203329}
+.account-panel form .btn{justify-content:center;margin-top:4px}
+.account-heading{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:15px}
+.account-heading h2{overflow-wrap:anywhere}
+.account-avatar{width:64px;height:64px;display:grid;place-items:center;border-radius:20px;background:#e4eddc;font-size:30px;flex-shrink:0}
+.account-actions{display:flex;gap:9px;flex-wrap:wrap;margin:18px 0}
+.account-hint{font-size:12px;color:#7c897e!important;margin-top:14px}
+@media(max-width:780px){.account-grid{grid-template-columns:1fr}.account-panel{padding:19px}}
+@media(max-width:500px){.account-panel{padding:16px}.account-panel h2{font-size:22px}.account-avatar{width:52px;height:52px}}
+
+</style></head><body><div id="app"><p style="font:16px system-ui;text-align:center;margin-top:25vh;color:#214b3a">AromaLab se prépare…</p></div><script src="./config.js"></script><script>
 window.addEventListener('error', function(event) {
   var root=document.getElementById('app');
   if(root && (!root.innerHTML || root.innerHTML.indexOf('app-shell')===-1)) {
@@ -2773,17 +2791,24 @@ window.AROMALAB_QUIZ_BONUS = {"mcqs":[{"id":"concept-01","question":"Quel acteur
   const findCat = id => categories.find(c => c.id === id);
   const app = document.getElementById('app');
   const STORAGE_KEY = 'aromalab-saves-v1';
+  let activeStorageKey = STORAGE_KEY;
+  const ACCOUNT_PREFIX = 'aromalab-account-v1-';
+  const accountCloud = {client:null,user:null,status:'disabled',busy:false,queued:false,error:'',ready:false};
+  let accountSyncTimer;
+  const guestStore=()=>{try{return JSON.parse(localStorage.getItem(STORAGE_KEY))||{};}catch{return {};}};
+  const normalizedResult=(r,i)=>({...r, entryId:r.entryId || `legacy-${Number(r.date)||0}-${r.mode||'quiz'}-${i}`});
   const emptyStore = () => ({discovered:[], favorites:[], notes:{}, results:[], daily:{}});
   const safeString = x => String(x ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const safeLoad = () => {
+  const safeLoad = (key=STORAGE_KEY) => {
     try {
-      const s = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+      const s = JSON.parse(localStorage.getItem(key)) || {};
       return {
         discovered: Array.isArray(s.discovered) ? s.discovered.filter(x => findAroma(x)) : [],
         favorites: Array.isArray(s.favorites) ? s.favorites.filter(x => findAroma(x)) : [],
         notes: s.notes && typeof s.notes === 'object' && !Array.isArray(s.notes) ? s.notes : {},
-        results: Array.isArray(s.results) ? s.results.slice(-80) : [],
-        daily: s.daily && typeof s.daily === 'object' && !Array.isArray(s.daily) ? s.daily : {}
+        results: Array.isArray(s.results) ? s.results.map(normalizedResult) : [],
+        daily: s.daily && typeof s.daily === 'object' && !Array.isArray(s.daily) ? s.daily : {},
+        profileUpdatedAt:Number(s.profileUpdatedAt)||0
       };
     } catch {return emptyStore();}
   };
@@ -2862,12 +2887,162 @@ window.AROMALAB_QUIZ_BONUS = {"mcqs":[{"id":"concept-01","question":"Quel acteur
   const currentStreak=()=>{const played=new Set(Object.keys(saved.daily).filter(k=>saved.daily[k]));const now=new Date();now.setHours(12,0,0,0);let count=0;for(let i=0;i<366;i++){const key=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;if(!played.has(key)){if(i===0){now.setDate(now.getDate()-1);continue;}break;}count++;now.setDate(now.getDate()-1);}return count;};
 
   let deferredInstall = null;
-  const persist = () => {try {localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));} catch {notify('Stockage indisponible : tes données ne seront pas conservées.');}};
+  const persist = () => {try {localStorage.setItem(activeStorageKey, JSON.stringify(saved)); if(accountCloud.user) scheduleAccountSync();} catch {notify('Stockage indisponible : tes données ne seront pas conservées.');}};
+  const cloudEnabled=()=>Boolean((window.AROMALAB_CLOUD_CONFIG||{}).url && (window.AROMALAB_CLOUD_CONFIG||{}).publishableKey);
+  const getGuestResults=()=>{const guest=guestStore();return Array.isArray(guest.results)?guest.results.map(normalizedResult):[];};
+  const resultIdentity=r=>String(r.entryId||'');
+  const uniqueResults=(items)=>{
+    const byId=new Map();
+    for (let i=0;i<items.length;i++) {
+      const r=normalizedResult(items[i],i);
+      byId.set(resultIdentity(r),r);
+    }
+    return [...byId.values()].sort((a,b)=>(Number(a.date)||0)-(Number(b.date)||0));
+  };
+  const accountState=()=>({discovered:saved.discovered,favorites:saved.favorites,notes:saved.notes,daily:saved.daily});
+  const recentChange=()=>Number(saved.profileUpdatedAt||0);
+  const syncProfile=async()=>{
+    if(!accountCloud.user||!accountCloud.client)return;
+    const {error}=await accountCloud.client.from('player_state').upsert({user_id:accountCloud.user.id,profile:accountState(),client_updated_at:recentChange()},{onConflict:'user_id'});
+    if(error)throw error;
+  };
+  const dbResult=r=>({user_id:accountCloud.user.id,entry_id:resultIdentity(r),played_ms:Number(r.date)||Date.now(),mode:String(r.mode||'aroma'),score:Math.max(0,Number(r.score)||0),total:Math.max(1,Number(r.total)||8),difficulty:String(r.difficulty||'toutes'),theme:String(r.theme||'mixte'),xp_earned:Math.max(0,Number(r.xpEarned)||((Number(r.score)||0)*10)),details:Array.isArray(r.details)?r.details:[]});
+  const localResult=r=>({entryId:r.entry_id,date:Number(r.played_ms),mode:r.mode,score:r.score,total:r.total,difficulty:r.difficulty,theme:r.theme,xpEarned:r.xp_earned,details:r.details||[]});
+  async function syncCloud(){
+    if(!accountCloud.client||!accountCloud.user||accountCloud.busy||!navigator.onLine)return;
+    accountCloud.busy=true;
+    accountCloud.status='syncing';render();
+    try {
+      const client=accountCloud.client;
+      const profileResult=await client.from('player_state').select('profile,client_updated_at').eq('user_id',accountCloud.user.id).maybeSingle();
+      if(profileResult.error)throw profileResult.error;
+      const p=profileResult.data;
+      if(p && Number(p.client_updated_at)>recentChange()) {
+        const data=p.profile||{};
+        saved.discovered=Array.isArray(data.discovered)?data.discovered.filter(findAroma):[];
+        saved.favorites=Array.isArray(data.favorites)?data.favorites.filter(findAroma):[];
+        saved.notes=data.notes&&typeof data.notes==='object'&&!Array.isArray(data.notes)?data.notes:{};
+        saved.daily=data.daily&&typeof data.daily==='object'&&!Array.isArray(data.daily)?data.daily:{};
+        saved.profileUpdatedAt=Number(p.client_updated_at);
+      } else if(!p||recentChange()>Number(p.client_updated_at)) {
+        await syncProfile();
+      }
+      const server=[];
+      for(let offset=0;;offset+=500){
+        const {data,error}=await client.from('quiz_results').select('*').eq('user_id',accountCloud.user.id).order('played_ms',{ascending:true}).range(offset,offset+499);
+        if(error)throw error;
+        server.push(...(data||[]));
+        if(!data||data.length<500)break;
+      }
+      const local=uniqueResults(saved.results);
+      const serverIds=new Set(server.map(x=>x.entry_id));
+      const unsent=local.filter(r=>!serverIds.has(resultIdentity(r)));
+      for(let offset=0;offset<unsent.length;offset+=80){
+        const {error}=await client.from('quiz_results').upsert(unsent.slice(offset,offset+80).map(dbResult),{onConflict:'user_id,entry_id',ignoreDuplicates:true});
+        if(error)throw error;
+      }
+      saved.results=uniqueResults([...server.map(localResult),...local]);
+      localStorage.setItem(activeStorageKey,JSON.stringify(saved));
+      accountCloud.status='online';accountCloud.error='';
+    } catch(err){accountCloud.status='offline';accountCloud.error=err?.message||'Synchronisation impossible';}
+    finally{accountCloud.busy=false;render();}
+  }
+  function scheduleAccountSync(){
+    if(!accountCloud.user)return;
+    saved.profileUpdatedAt=Date.now();
+    try{localStorage.setItem(activeStorageKey,JSON.stringify(saved));}catch{}
+    clearTimeout(accountSyncTimer);
+    accountSyncTimer=setTimeout(()=>syncCloud(),950);
+  }
+  function useAccount(user){
+    if(!user)return;
+    if(accountCloud.user?.id===user.id)return;
+    accountCloud.user=user;
+    activeStorageKey=ACCOUNT_PREFIX+user.id;
+    saved=safeLoad(activeStorageKey);
+    try{localStorage.setItem('aromalab-last-user-id',user.id);}catch{}
+    accountCloud.status=navigator.onLine?'syncing':'offline';
+    state.quiz=null;
+    render();
+    syncCloud();
+  }
+  function useGuest(){
+    clearTimeout(accountSyncTimer);
+    accountCloud.user=null;accountCloud.status=cloudEnabled()?'guest':'disabled';
+    accountCloud.error='';
+    activeStorageKey=STORAGE_KEY;
+    try{localStorage.removeItem('aromalab-last-user-id');}catch{}
+    saved=safeLoad(STORAGE_KEY);
+    state.quiz=null;
+    render();
+  }
+  async function initializeAccount(){
+    if(!cloudEnabled()){accountCloud.status='disabled';return;}
+    const settings=window.AROMALAB_CLOUD_CONFIG;
+    if(!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(settings.url)){
+      accountCloud.error='URL Supabase incorrecte dans config.js.';accountCloud.status='disabled';return;
+    }
+    accountCloud.status='connecting';render();
+    try {
+      await new Promise((resolve,reject)=>{
+        if(window.supabase?.createClient)return resolve();
+        const script=document.createElement('script');
+        script.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';script.async=true;
+        script.onload=resolve;script.onerror=()=>reject(new Error('Bibliothèque Supabase indisponible.'));
+        document.head.appendChild(script);
+      });
+      accountCloud.client=window.supabase.createClient(settings.url,settings.publishableKey,{auth:{autoRefreshToken:true,persistSession:true,detectSessionInUrl:true}});
+      accountCloud.ready=true;
+      const {data,error}=await accountCloud.client.auth.getSession();
+      if(error)throw error;
+      if(data?.session?.user)useAccount(data.session.user);
+      else {accountCloud.status='guest';render();}
+      accountCloud.client.auth.onAuthStateChange((ev,session)=>{
+        if(ev==='SIGNED_OUT')useGuest();
+        else if((ev==='SIGNED_IN'||ev==='INITIAL_SESSION')&&session?.user&&session.user.id!==accountCloud.user?.id){
+          setTimeout(()=>useAccount(session.user),0);
+        }
+      });
+    }catch(err){accountCloud.status='offline';accountCloud.error=err?.message||'Connexion indisponible';render();}
+  }
+  async function authAction(kind,form){
+    if(!accountCloud.client){notify('Configure d’abord Supabase, puis recharge la page.');return;}
+    const email=String(form.querySelector('[name=email]')?.value||'').trim();
+    const password=String(form.querySelector('[name=password]')?.value||'');
+    if(!email||password.length<8){notify('Indique un e-mail et un mot de passe d’au moins 8 caractères.');return;}
+    accountCloud.status='connecting';render();
+    try{
+      const result=kind==='signup'
+        ?await accountCloud.client.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname}})
+        :await accountCloud.client.auth.signInWithPassword({email,password});
+      if(result.error)throw result.error;
+      if(result.data?.session?.user){useAccount(result.data.session.user);notify('Tu es connecté(e) !');}
+      else {accountCloud.status='guest';notify('Vérifie tes e-mails et confirme ton adresse avant de te connecter.');render();}
+    }catch(err){accountCloud.status='guest';notify(err?.message||'Impossible de se connecter.');render();}
+  }
+  async function importGuest(){
+    if(!accountCloud.user)return;
+    const guest=guestStore();const list=getGuestResults();
+    if(!list.length){notify('Aucune ancienne partie à importer.');return;}
+    if(!confirm(`Importer ${list.length} anciennes parties depuis cet appareil dans ton compte ? L’import ne modifie pas la sauvegarde d’origine.`))return;
+    saved.results=uniqueResults([...saved.results,...list]);
+    // Fusionner aussi les découvertes et réponses du défi pour retrouver les XP antérieurs.
+    saved.discovered=[...new Set([...saved.discovered,...(guest.discovered||[])])].filter(findAroma);
+    saved.favorites=[...new Set([...saved.favorites,...(guest.favorites||[])])].filter(findAroma);
+    saved.notes={...(guest.notes||{}),...saved.notes};
+    saved.daily={...(guest.daily||{}),...saved.daily};
+    persist();await syncCloud();
+    notify('Import lancé : vérifie le statut de synchronisation de ton compte.');
+  }
+  window.addEventListener('online',()=>{if(accountCloud.user)syncCloud();else if(cloudEnabled()&&!accountCloud.client)initializeAccount();});
+  window.addEventListener('offline',()=>{if(accountCloud.user){accountCloud.status='offline';render();}});
+
   const icons = {
     home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>',
     explore:'<circle cx="12" cy="12" r="9"/><path d="m16 8-2.5 5.5L8 16l2.5-5.5z"/>',
     game:'<rect x="3" y="7" width="18" height="12" rx="5"/><path d="M8 10v6m-3-3h6m6-1h.01M19 15h.01"/>',
     collection:'<path d="M5 4h14a1 1 0 0 1 1 1v15l-8-5-8 5V5a1 1 0 0 1 1-1z"/>',
+    user:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
     info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/>',
     right:'<path d="M5 12h14m-7-7 7 7-7 7"/>',
     left:'<path d="M19 12H5m7 7-7-7 7-7"/>',
@@ -2901,15 +3076,15 @@ window.AROMALAB_QUIZ_BONUS = {"mcqs":[{"id":"concept-01","question":"Quel acteur
   const cap = s => s.charAt(0).toUpperCase()+s.slice(1);
   const totalScore = () => saved.discovered.length*15 + saved.results.reduce((acc,x)=>acc+(Number(x.xpEarned) || (Number(x.score)||0)*10),0) + Object.keys(saved.daily).filter(k=>saved.daily[k] && saved.daily[k].correct).length*20;
   const currentLevel = () => Math.floor(totalScore()/180)+1;
-  const navItems = [{id:'home',name:'Accueil',icon:'home'},{id:'explore',name:'Explorer les arômes',icon:'explore'},{id:'game',name:'Jouer & apprendre',icon:'game'},{id:'history',name:'Mes parties',icon:'calendar'},{id:'collection',name:'Ma collection',icon:'collection'},{id:'about',name:'À propos',icon:'info'}];
+  const navItems = [{id:'home',name:'Accueil',icon:'home'},{id:'explore',name:'Explorer les arômes',icon:'explore'},{id:'game',name:'Jouer & apprendre',icon:'game'},{id:'history',name:'Mes parties',icon:'calendar'},{id:'collection',name:'Ma collection',icon:'collection'},{id:'account',name:'Mon compte',icon:'user'},{id:'about',name:'À propos',icon:'info'}];
   function navigate(page,opts={}){state.page=page;state.modal=null;if(page==='explore' && opts.filter) state.filter=opts.filter;if(page==='explore' && opts.search!==undefined) state.search=opts.search;render();window.scrollTo({top:0,behavior:'instant'});}
-  const navButton = (x, mobile=false) => `<button type="button" data-nav="${x.id}" class="${mobile?'bottom-link':'nav-link'} ${state.page===x.id?'active':''}" ${state.page===x.id?'aria-current="page"':''}>${svg(x.icon)}<span>${mobile?(x.id==='home'?'Accueil':x.id==='explore'?'Arômes':x.id==='game'?'Quiz':x.id==='collection'?'Collection':'Infos'):x.name}</span></button>`;
+  const navButton = (x, mobile=false) => `<button type="button" data-nav="${x.id}" class="${mobile?'bottom-link':'nav-link'} ${state.page===x.id?'active':''}" ${state.page===x.id?'aria-current="page"':''}>${svg(x.icon)}<span>${mobile?(x.id==='home'?'Accueil':x.id==='explore'?'Arômes':x.id==='game'?'Quiz':x.id==='collection'?'Collection':x.id==='account'?'Compte':'Infos'):x.name}</span></button>`;
   function shell(body){return `<div class="app-shell">
     <aside class="sidebar" aria-label="Navigation principale">
       <a href="#" data-nav="home" class="brand" aria-label="AromaLab, accueil"><span class="brand-icon">✳</span><span><span class="brand-name">Aroma<span class="brand-dot">Lab</span></span><div class="brand-sub">Le goût de la découverte</div></span></a>
       <div class="side-label">Découvrir</div><nav class="nav-list">${navItems.map(x=>navButton(x)).join('')}</nav>
       <div class="side-spacer"></div><div class="side-tip"><div class="tip-top">🌿 Le conseil du labo</div><p>Pour exercer ton nez, commence par les odeurs du quotidien. Pas besoin de goûter une boisson !</p><button type="button" data-nav="explore">Explorer les arômes ${svg('right')}</button></div>
-      <div class="side-foot">AromaLab · version 1.3.2 · historique des quiz</div>
+      <div class="side-foot">AromaLab · version 1.3.3 · comptes & sauvegarde</div>
     </aside><main class="main" id="main-content"><div class="main-wrap">
       <header class="topbar"><div class="topbar-left">Le petit laboratoire des <strong>grandes découvertes.</strong></div><div class="mobile-logo"><span class="brand-icon">✳</span>AromaLab</div><div class="topbar-right"><span class="top-date">${new Intl.DateTimeFormat('fr-FR',{weekday:'long',day:'numeric',month:'long'}).format(new Date())}</span><span class="top-score" title="Points pédagogiques"> <span class="spark">✦</span> ${totalScore()} pts</span><span class="top-avatar" title="Ton niveau">${currentLevel()}</span></div></header>
       ${body}<div class="footer-note">Fait pour apprendre, sans obligation de consommation. <button type="button" data-nav="about">Sources & confidentialité</button></div>
@@ -3003,7 +3178,7 @@ window.AROMALAB_QUIZ_BONUS = {"mcqs":[{"id":"concept-01","question":"Quel acteur
       </article>`;
     }).join('')}</div>`;
   }
-  function history(){return `<div class="page">${title('Mon apprentissage','Mes quiz terminés.','Retrouve toutes les parties enregistrées sur cet appareil et revois tes réponses pour les nouveaux quiz.')}<div class="history-banner"><div><strong>📚 ${saved.results.length} partie${saved.results.length>1?'s':''} enregistrée${saved.results.length>1?'s':''}</strong><p>Les anciennes parties conservent leurs scores. À partir de la version 1.3.2, les réponses sont aussi enregistrées pour réviser.</p></div><button class="btn btn-primary btn-small" data-nav="game">Nouveau quiz ${svg('right')}</button></div>${historyList()}<p class="history-legend">🔒 Données stockées localement, limitées aux 80 dernières parties. Elles ne sont pas synchronisées entre appareils. Les défis quotidiens sont suivis dans les statistiques, pas dans cette liste de quiz.</p></div>`;}
+  function history(){return `<div class="page">${title('Mon apprentissage','Mes quiz terminés.','Retrouve toutes tes parties, et synchronise-les sur tous tes appareils avec ton compte.')}<div class="history-banner"><div><strong>📚 ${saved.results.length} partie${saved.results.length>1?'s':''} enregistrée${saved.results.length>1?'s':''}</strong><p>Les anciennes parties conservent leurs scores. À partir de la version 1.3.2, les réponses sont aussi enregistrées pour réviser.</p></div><button class="btn btn-primary btn-small" data-nav="game">Nouveau quiz ${svg('right')}</button></div>${historyList()}<p class="history-legend">🔒 Données stockées localement, sans limite dans cette version. Avec un compte, elles sont aussi synchronisées dans le cloud. Les défis quotidiens sont suivis dans les statistiques, pas dans cette liste de quiz.</p></div>`;}
   function game(){return `<div class="page">${title('Atelier interactif','Apprendre en jouant.','Quatre modes, trois difficultés et des corrections appuyées sur les publications scientifiques de la bibliothèque.')} ${currentQuiz()} <section class="section"><div class="section-head"><div><h2 class="section-title">Ton parcours de scientifique</h2><p class="section-sub">${saved.results.length} quiz terminés · ${avgPercent()} % de bonnes réponses au total</p></div></div><div class="science-quiz-statgrid"><div class="science-quiz-stat"><strong>${totalScore()}</strong><small>XP cumulés</small></div><div class="science-quiz-stat"><strong>${currentLevel()}</strong><small>Niveau actuel</small></div><div class="science-quiz-stat"><strong>${currentStreak()}</strong><small>Jours de défis consécutifs</small></div></div><div class="history-banner"><div><strong>📒 Mes quiz déjà faits</strong><p>${saved.results.length} partie${saved.results.length>1?'s':''} terminée${saved.results.length>1?'s':''} · Retrouve les scores et les réponses enregistrées.</p></div><button type="button" class="btn btn-primary btn-small" data-nav="history">Voir mon historique ${svg('right')}</button></div>${historyList(3)}<div class="section-note">🧠 Les associations proposées constituent des exemples documentés, jamais des règles absolues. Tu peux apprendre sans consommer d’alcool.</div></section></div>`;}
   function daily(){const q=dailyQuestion(),answered=dailyPlayed();return `<div class="page">${title('Ton rendez-vous quotidien','Le défi du jour.','Une question sourcée par jour pour garder la curiosité en éveil.')}<div class="quiz-panel"><div class="quiz-head"><button class="btn btn-quiet btn-small" data-nav="home">${svg('left')} Retour à l’accueil</button><span class="pill light">${svg('calendar')} ${todayKey().split('-').reverse().join('/')}</span></div><div class="question-kicker">✦ Vrai ou faux ? · ${difficultyLabels[q.difficulty]}</div><h2 class="quiz-question">${safeString(q.question)}</h2><div class="quiz-choices">${['Vrai','Faux'].map(choice=>`<button class="choice ${answered?(choice===q.answer?'correct':String(answered.answer)===choice?'wrong':''):''}" data-daily-answer="${choice}" ${answered?'disabled':''}><span class="choice-letter">${choice==='Vrai'?'V':'F'}</span>${choice}</button>`).join('')}</div>${answered?`<div class="answer-panel ${answered.correct?'':'wrong'}"><strong>${answered.correct?'✓ Bonne réponse !':'↗ La réponse était : '+q.answer}</strong><p>${safeString(q.why)}</p>${quizSources(q.refs)}</div><div class="answer-actions"><button class="btn btn-outline" data-nav="game">Explorer les autres quiz ${svg('right')}</button></div>`:`<div class="section-note" style="margin-top:22px">🌿 +20 XP en cas de bonne réponse. Tu peux répondre sans goûter de boisson alcoolisée.</div>`}</div></div>`;}
   function achievements(){const c=saved.discovered.length,n=saved.results.length,d=Object.keys(saved.daily).length;return [
@@ -3020,14 +3195,23 @@ window.AROMALAB_QUIZ_BONUS = {"mcqs":[{"id":"concept-01","question":"Quel acteur
   ];}
   function quizStatistics(){const done=saved.results.length;const totalAnswers=saved.results.reduce((n,r)=>n+(Number(r.total)||8),0);const correct=saved.results.reduce((n,r)=>n+(Number(r.score)||0),0);
     const labels={aroma:'Arômes',molecule:'Molécules',science:'Science',truefalse:'Vrai / Faux'};
-    return `<section class="section"><div class="section-head"><div><h2 class="section-title">Mes statistiques de quiz</h2><p class="section-sub">Suis tes progrès et les sujets à réviser.</p></div></div><div class="science-quiz-statgrid"><div class="science-quiz-stat"><strong>${done}</strong><small>Parties jouées</small></div><div class="science-quiz-stat"><strong>${totalAnswers?Math.round(100*correct/totalAnswers):0}%</strong><small>Réponses correctes</small></div><div class="science-quiz-stat"><strong>${currentStreak()} j</strong><small>Série quotidienne</small></div></div><div class="surface" style="padding:20px;border-radius:20px"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><strong>Niveau ${currentLevel()}</strong><span style="font-size:12px;color:var(--muted)">${nextLevelPoints()} XP avant le niveau ${currentLevel()+1}</span></div><div class="level-meter" role="progressbar" aria-valuemin="0" aria-valuemax="180" aria-valuenow="${totalScore()%180}"><span style="width:${(totalScore()%180)/180*100}%"></span></div>${Object.entries(labels).map(([key,label])=>{const items=saved.results.filter(r=>r.mode===key);const total=items.reduce((s,r)=>s+(Number(r.total)||8),0),ok=items.reduce((s,r)=>s+(Number(r.score)||0),0),pct=total?Math.round(100*ok/total):0;return `<div class="category-progress"><span>${label}</span><div class="bar"><i style="width:${pct}%"></i></div><em>${pct}%</em></div>`;}).join('')}<p style="font-size:12px;color:var(--muted);margin-bottom:0">Les pourcentages tiennent compte des parties enregistrées sur cet appareil.</p></div></section>`;
+    return `<section class="section"><div class="section-head"><div><h2 class="section-title">Mes statistiques de quiz</h2><p class="section-sub">Suis tes progrès et les sujets à réviser.</p></div></div><div class="science-quiz-statgrid"><div class="science-quiz-stat"><strong>${done}</strong><small>Parties jouées</small></div><div class="science-quiz-stat"><strong>${totalAnswers?Math.round(100*correct/totalAnswers):0}%</strong><small>Réponses correctes</small></div><div class="science-quiz-stat"><strong>${currentStreak()} j</strong><small>Série quotidienne</small></div></div><div class="surface" style="padding:20px;border-radius:20px"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><strong>Niveau ${currentLevel()}</strong><span style="font-size:12px;color:var(--muted)">${nextLevelPoints()} XP avant le niveau ${currentLevel()+1}</span></div><div class="level-meter" role="progressbar" aria-valuemin="0" aria-valuemax="180" aria-valuenow="${totalScore()%180}"><span style="width:${(totalScore()%180)/180*100}%"></span></div>${Object.entries(labels).map(([key,label])=>{const items=saved.results.filter(r=>r.mode===key);const total=items.reduce((s,r)=>s+(Number(r.total)||8),0),ok=items.reduce((s,r)=>s+(Number(r.score)||0),0),pct=total?Math.round(100*ok/total):0;return `<div class="category-progress"><span>${label}</span><div class="bar"><i style="width:${pct}%"></i></div><em>${pct}%</em></div>`;}).join('')}<p style="font-size:12px;color:var(--muted);margin-bottom:0">Les pourcentages tiennent compte de toutes tes parties enregistrées et synchronisées.</p></div></section>`;
   }
   function collection(){const done=aromes.filter(a=>saved.discovered.includes(a.id));const fav=aromes.filter(a=>saved.favorites.includes(a.id));const pct=100*done.length/aromes.length;return `<div class="page">${title('Ton carnet personnel','Ma collection.','Garde la trace des arômes que tu as identifiés dans la vie quotidienne et retrouve tes favoris.')}<div class="collection-top"><div><span class="eyebrow">✦ Mon parcours</span><h2>${done.length===aromes.length?'Collection complète !':'Chaque découverte compte.'}</h2><p>${done.length} arôme${done.length>1?'s':''} repéré${done.length>1?'s':''} sur ${aromes.length}. Ouvre une fiche et coche « Je l’ai senti » pour l’ajouter ici.</p></div><div class="round-meter" style="--pct:${pct}%"><div class="meter-inner"><strong>${Math.round(pct)} %</strong><span>complété</span></div></div></div>
     ${quizStatistics()}<div class="history-banner"><div><strong>📚 Historique de mes quiz</strong><p>Les dates, résultats et réponses enregistrées dans un même endroit.</p></div><button type="button" class="btn btn-primary btn-small" data-nav="history">Voir mes parties ${svg('right')}</button></div><section class="section"><div class="section-head"><div><h2 class="section-title">Mes badges</h2><p class="section-sub">Ils se débloquent en explorant et en jouant.</p></div></div><div class="achievement-grid">${achievements().map(a=>`<div class="achievement ${a.ok?'earned':''}"><div class="achievement-icon">${a.ok?a.emoji:'🔒'}</div><div><strong>${a.name}</strong><span>${a.desc}</span></div></div>`).join('')}</div></section>
     <section class="section"><div class="section-head"><div><h2 class="section-title">Arômes déjà découverts</h2><p class="section-sub">${done.length} / ${aromes.length} trouvés.</p></div><button class="section-link" data-nav="explore">Tout explorer →</button></div><div class="aroma-grid">${done.length?done.map(aromaCard).join(''):`<div class="empty-state"><div class="big">🌱</div><h3>Ton aventure commence ici</h3><p>Commence par une odeur simple : le citron, le café ou une banane mûre. Ouvre ensuite sa fiche et marque-la comme découverte.</p><button class="btn btn-primary" data-nav="explore">Découvrir les arômes ${svg('right')}</button></div>`}</div></section>
     <section class="section"><div class="section-head"><div><h2 class="section-title">Mes favoris</h2><p class="section-sub">Tes références à retrouver en un clin d’œil.</p></div></div><div class="aroma-grid">${fav.length?fav.map(aromaCard).join(''):`<div class="empty-state"><div class="big">♡</div><h3>Pas encore de favoris</h3><p>Touche le cœur d’une fiche pour enregistrer tes arômes préférés.</p><button class="btn btn-outline" data-nav="explore">Explorer la bibliothèque</button></div>`}</div></section>
-    <section class="section"><div class="section-note">🔒 Tes découvertes, quiz et notes restent <strong>sur cet appareil, dans ce navigateur</strong>. Elles ne sont pas synchronisées avec un compte. Effacer les données du navigateur peut les supprimer.</div></section></div>`;}
-  function about(){return `<div class="page">${title('À propos du projet','Un labo dans ta poche.','Une porte d’entrée ludique vers les odeurs, la chimie des arômes et la dégustation sensorielle.')}<div class="about-layout"><section class="surface about-card"><h2>La science derrière AromaLab</h2><p>Chaque fiche fait le lien entre une <strong>odeur reconnaissable</strong>, un <strong>composé parfois associé</strong> et des exemples d’expression dans le vin ou la bière.</p><p>La réalité est plus nuancée : un même descripteur peut résulter d’un mélange de molécules, et l’effet sensoriel dépend de leur concentration, du produit et de la sensibilité individuelle. Les exemples sont indicatifs et ne constituent pas des règles absolues. Les fiches citées s’appuient sur des études et revues scientifiques vérifiables ; une citation ne signifie pas que chaque combinaison molécule–boisson a été démontrée expérimentalement par la même étude. Les seuils varient selon la matrice et ne sont donc pas chiffrés ici sans contexte expérimental.</p><div class="about-info"><strong>🌿 Apprendre sans consommer</strong><p>Les défis olfactifs utilisent des produits alimentaires ou végétaux du quotidien. Tu n’as pas besoin de boire d’alcool. Ne sens jamais de produits chimiques, de solvants ou de fumées volontairement pour réaliser un exercice.</p></div><div class="about-info"><strong>🔒 Respect de tes données</strong><p>Pas de compte, pas de publicité, pas de serveur de suivi : les favoris, notes et scores sont enregistrés localement dans ce navigateur. Tu peux supprimer ces données à tout moment.</p><button class="btn btn-outline btn-small" style="margin-top:12px" data-clear-data>${svg('trash')} Effacer mes données</button></div><div class="about-info"><strong>📱 Installer AromaLab</strong><p>Une fois le site publié en HTTPS, ouvre-le dans ton navigateur et choisis « Ajouter à l’écran d’accueil » ou « Installer l’application ». L’installation varie selon l’appareil.</p><button class="btn btn-primary btn-small" style="margin-top:12px" data-install>Installer si disponible ${svg('right')}</button></div></section>
+    <section class="section"><div class="section-note">🔒 Tes données restent locales en mode invité. Avec un compte configuré et connecté, elles peuvent aussi être synchronisées dans le cloud.</div></section></div>`;}
+  function accountPage(){
+    const user=accountCloud.user;
+    const status=accountCloud.status;
+    const badge=status==='online'?'🟢 Synchronisé':status==='syncing'?'🟡 Synchronisation…':status==='offline'?'🟠 Hors ligne':status==='connecting'?'🟡 Connexion…':'⚪ Mode invité';
+    const old=getGuestResults().length;
+    if(!cloudEnabled())return `<div class="page">${title('Mes données','Mon compte.','Sauvegarde en ligne des parties et des XP.')}<section class="surface account-panel"><h2>🔐 Connexion à activer</h2><p>L’interface est prête, mais la base Supabase doit être configurée par la personne qui gère AromaLab.</p><p>En attendant, les quiz fonctionnent toujours en local, sans compte.</p><p class="account-hint">Lis le fichier INSTALLATION-SUPABASE.md fourni avec cette version. Ne publie jamais de clé secrète.</p></section></div>`;
+    if(!user)return `<div class="page">${title('Tes progrès, partout','Mon compte.','Inscris-toi ou connecte-toi pour conserver tes parties et tes XP dans le cloud.')}<div class="account-grid"><section class="surface account-panel"><h2>🌱 Créer un compte</h2><p>Un e-mail de confirmation peut être envoyé.</p><form data-account-form="signup"><label>Adresse e-mail<input type="email" name="email" required autocomplete="email" placeholder="ton@email.fr"></label><label>Mot de passe (8 caractères minimum)<input type="password" name="password" required minlength="8" autocomplete="new-password"></label><button class="btn btn-primary" type="submit">Créer mon compte</button></form></section><section class="surface account-panel"><h2>✨ Se connecter</h2><p>Retrouve tes quiz sur tes appareils.</p><form data-account-form="login"><label>Adresse e-mail<input type="email" name="email" required autocomplete="email" placeholder="ton@email.fr"></label><label>Mot de passe<input type="password" name="password" required autocomplete="current-password"></label><button class="btn btn-outline" type="submit">Se connecter</button></form><p class="account-hint">${safeString(accountCloud.error||'Les mots de passe sont gérés par Supabase. Ils ne sont pas enregistrés dans le code AromaLab.')}</p></section></div><section class="section-note">📱 Les anciennes parties restent sur ton appareil tant que tu ne choisis pas de les importer dans un compte.</section></div>`;
+    return `<div class="page">${title('Ta progression protégée','Mon compte.','Retrouve toutes les parties synchronisées et ton niveau.')}<section class="surface account-panel"><div class="account-heading"><div><span class="eyebrow">✦ Compte connecté</span><h2>${safeString(user.email||'Mon profil')}</h2><p>${badge}</p></div><span class="account-avatar">👃</span></div><div class="science-quiz-statgrid"><div class="science-quiz-stat"><strong>${saved.results.length}</strong><small>Parties enregistrées</small></div><div class="science-quiz-stat"><strong>${totalScore()}</strong><small>XP cumulés</small></div><div class="science-quiz-stat"><strong>${currentLevel()}</strong><small>Niveau</small></div></div><div class="account-actions"><button class="btn btn-primary btn-small" data-sync-account ${accountCloud.busy?'disabled':''}>↻ Synchroniser</button><button class="btn btn-outline btn-small" data-logout>Se déconnecter</button></div>${old?`<div class="history-banner"><div><strong>📥 ${old} ancienne${old>1?'s':''} partie${old>1?'s':''} sur cet appareil</strong><p>Tu peux les importer une seule fois dans ton compte, sans effacer la sauvegarde invitée.</p></div><button class="btn btn-outline btn-small" data-import-guest>Importer mes anciennes parties</button></div>`:''}<p class="account-hint">Les nouvelles parties sont enregistrées sur l'appareil puis synchronisées quand Internet est disponible. Une connexion est nécessaire pour les retrouver sur un autre appareil. Les sauvegardes antérieures à la limite des 80 parties ne peuvent pas être restaurées si elles ont déjà été supprimées.</p><p class="account-hint">${accountCloud.error?safeString('Dernière erreur : '+accountCloud.error):'Chaque utilisateur ne peut consulter que ses propres données grâce aux règles d’accès.'}</p></section><section class="section-note">🔒 Pour effacer les données de ton compte ou le supprimer, consulte la rubrique « À propos » et la documentation du projet.</section></div>`;
+  }
+  function about(){return `<div class="page">${title('À propos du projet','Un labo dans ta poche.','Une porte d’entrée ludique vers les odeurs, la chimie des arômes et la dégustation sensorielle.')}<div class="about-layout"><section class="surface about-card"><h2>La science derrière AromaLab</h2><p>Chaque fiche fait le lien entre une <strong>odeur reconnaissable</strong>, un <strong>composé parfois associé</strong> et des exemples d’expression dans le vin ou la bière.</p><p>La réalité est plus nuancée : un même descripteur peut résulter d’un mélange de molécules, et l’effet sensoriel dépend de leur concentration, du produit et de la sensibilité individuelle. Les exemples sont indicatifs et ne constituent pas des règles absolues. Les fiches citées s’appuient sur des études et revues scientifiques vérifiables ; une citation ne signifie pas que chaque combinaison molécule–boisson a été démontrée expérimentalement par la même étude. Les seuils varient selon la matrice et ne sont donc pas chiffrés ici sans contexte expérimental.</p><div class="about-info"><strong>🌿 Apprendre sans consommer</strong><p>Les défis olfactifs utilisent des produits alimentaires ou végétaux du quotidien. Tu n’as pas besoin de boire d’alcool. Ne sens jamais de produits chimiques, de solvants ou de fumées volontairement pour réaliser un exercice.</p></div><div class="about-info"><strong>🔒 Respect de tes données</strong><p>Sans connexion, tes données restent uniquement dans ce navigateur. Avec un compte et Supabase configuré, les scores, réponses, découvertes, favoris et notes sont également stockés en ligne et associés à ton identifiant de compte. Ne saisis jamais de données sensibles dans les notes. Tu peux effacer les données stockées sur l’appareil ou demander la suppression complète de ton compte à l’administrateur du service.</p><button class="btn btn-outline btn-small" style="margin-top:12px" data-clear-data>${svg('trash')} Effacer mes données</button></div><div class="about-info"><strong>📱 Installer AromaLab</strong><p>Une fois le site publié en HTTPS, ouvre-le dans ton navigateur et choisis « Ajouter à l’écran d’accueil » ou « Installer l’application ». L’installation varie selon l’appareil.</p><button class="btn btn-primary btn-small" style="margin-top:12px" data-install>Installer si disponible ${svg('right')}</button></div></section>
     <section class="surface about-card"><h2>Sources scientifiques</h2><p>Références scientifiques vérifiables (articles et revues à comité de lecture), avec une ressource universitaire complémentaire. Chaque fiche renvoie aux études pertinentes ; les liens nécessitent Internet.</p>${DB.sources.map(s=>`<div class="source-item"><a href="${safeString(s.url)}" target="_blank" rel="noopener noreferrer">${safeString(s.title)} ↗</a><p>${safeString(s.info)}</p></div>`).join('')}</section></div></div>`;}
   function detailModal(a){if(!a)return '';const cat=findCat(a.category),done=saved.discovered.includes(a.id),fav=saved.favorites.includes(a.id),note=typeof saved.notes[a.id]==='string'?saved.notes[a.id]:'';return `<div class="modal-backdrop" data-close-modal><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="icon-button modal-close" data-close-modal aria-label="Fermer la fiche">${svg('x')}</button><div class="modal-hero" style="--tile:${cat.pale}"><div class="modal-emoji" aria-hidden="true">${a.emoji}</div><div class="modal-hero-text"><span class="eyebrow">${cat.icon} ${cat.name}</span><h2 id="modal-title">${safeString(a.name)}</h2><p>${safeString(a.subtitle)}</p></div></div><div class="modal-content"><p class="modal-intro">Découvre cette note, son origine possible et les contextes où elle peut se manifester.</p><div class="modal-feature"><div class="tiny">🧬 Molécule associée</div><strong>${safeString(a.molecule)}</strong><small>${safeString(a.family)} · Exemple de composé, pas une origine exclusive</small></div>
     <div class="detail-columns"><div class="detail-block"><div class="detail-label">${svg('flask')} D’où vient-elle ?</div><p>${safeString(a.origin)}</p></div><div class="detail-block"><div class="detail-label">${svg('explore')} Au quotidien</div><p>${safeString(a.everyday)}</p></div><div class="detail-block"><div class="detail-label">${svg('wine')} Dans le vin</div><p>${safeString(a.wine)}</p></div><div class="detail-block"><div class="detail-label">${svg('beer')} Dans la bière</div><p>${safeString(a.beer)}</p></div></div>
@@ -3036,16 +3220,20 @@ window.AROMALAB_QUIZ_BONUS = {"mcqs":[{"id":"concept-01","question":"Quel acteur
     <div class="modal-actions"><button class="btn ${done?'btn-light':'btn-primary'}" data-discover="${a.id}">${svg('check')} ${done?'Déjà senti ✓':'Je l’ai senti !'}</button><button class="btn ${fav?'btn-light':'btn-outline'}" data-detail-fav="${a.id}">${svg('heart')} ${fav?'En favori ♥':'Ajouter aux favoris'}</button><button class="btn btn-light" data-save-note="${a.id}">Enregistrer ma note</button></div>
     <div class="modal-sources">Publications scientifiques associées : ${a.sources.map(id=>{const s=DB.sources.find(x=>x.id===id);return s?`<a href="${safeString(s.url)}" target="_blank" rel="noopener noreferrer">${safeString(s.title)} ↗</a>`:'';}).join('')}</div>
   </div></section></div>`;}
-  function render(){let body;switch(state.page){case 'explore':body=explore();break;case 'game':body=game();break;case 'collection':body=collection();break;case 'history':body=history();break;case 'about':body=about();break;case 'daily':body=daily();break;default:body=home();}app.innerHTML=shell(body)+(state.modal?detailModal(findAroma(state.modal)):'');document.body.style.overflow=state.modal?'hidden':'';if(state.modal)app.querySelector('.modal-close')?.focus();}
+  function render(){let body;switch(state.page){case 'account':body=accountPage();break;case 'explore':body=explore();break;case 'game':body=game();break;case 'collection':body=collection();break;case 'history':body=history();break;case 'about':body=about();break;case 'daily':body=daily();break;default:body=home();}app.innerHTML=shell(body)+(state.modal?detailModal(findAroma(state.modal)):'');document.body.style.overflow=state.modal?'hidden':'';if(state.modal)app.querySelector('.modal-close')?.focus();}
   let toastTimer;
   function notify(message){document.querySelector('.toast')?.remove();const div=document.createElement('div');div.className='toast';div.setAttribute('role','status');div.textContent=message;document.body.append(div);clearTimeout(toastTimer);toastTimer=setTimeout(()=>div.remove(),2700);}
   function toggleFavorite(id){saved.favorites=saved.favorites.includes(id)?saved.favorites.filter(x=>x!==id):[...saved.favorites,id];persist();render();notify(saved.favorites.includes(id)?'Ajouté aux favoris ♡':'Retiré des favoris');}
   function toggleDiscovered(id){saved.discovered=saved.discovered.includes(id)?saved.discovered.filter(x=>x!==id):[...saved.discovered,id];persist();render();notify(saved.discovered.includes(id)?'Une nouvelle découverte dans ta collection !':'Arôme retiré de la collection');}
-  function nextQuestion(){const q=state.quiz;if(!q || q.selected===null)return;if(q.idx===q.items.length-1){q.done=true;q.xpEarned=quizXP(q);if(!q.recorded){saved.results.push({mode:q.mode,score:q.score,total:q.items.length,date:Date.now(),difficulty:q.settings.difficulty,theme:q.settings.theme,xpEarned:q.xpEarned,details:q.items.map((item,i)=>({id:item.id,question:item.question,selected:q.answers[i],answer:item.answer,why:item.why,refs:item.refs}))});saved.results=saved.results.slice(-80);q.recorded=true;persist();}}else{q.idx++;q.selected=null;}render();}
+  function nextQuestion(){const q=state.quiz;if(!q || q.selected===null)return;if(q.idx===q.items.length-1){q.done=true;q.xpEarned=quizXP(q);if(!q.recorded){saved.results.push({entryId:(crypto.randomUUID?crypto.randomUUID():'quiz-'+Date.now()+'-'+Math.random().toString(36).slice(2)),mode:q.mode,score:q.score,total:q.items.length,date:Date.now(),difficulty:q.settings.difficulty,theme:q.settings.theme,xpEarned:q.xpEarned,details:q.items.map((item,i)=>({id:item.id,question:item.question,selected:q.answers[i],answer:item.answer,why:item.why,refs:item.refs}))});q.recorded=true;persist();}}else{q.idx++;q.selected=null;}render();}
   const shareScore = async () => {if(!state.quiz)return;const text=`J'ai obtenu ${state.quiz.score}/${state.quiz.items.length} au quiz AromaLab 🌿🧪 ! Découvre les ${totalQuestions} questions scientifiques : https://dinlisa.github.io/Aromalab/`;try {if(navigator.share){await navigator.share({title:'AromaLab',text});notify('Partage prêt !');return;}if(navigator.clipboard && window.isSecureContext){await navigator.clipboard.writeText(text);notify('Score copié !');return;}const t=document.createElement('textarea');t.value=text;t.style.position='fixed';t.style.opacity='0';document.body.appendChild(t);t.select();const ok=document.execCommand('copy');t.remove();notify(ok?'Score copié !':'Copie non disponible.');}catch(e){if(e.name!=='AbortError')notify('Partage indisponible sur cet appareil.');}};
+  document.addEventListener('submit',async event=>{const form=event.target.closest('form[data-account-form]');if(!form)return;event.preventDefault();const data=new FormData(form);const kind=form.dataset.accountForm;await authAction(kind,{querySelector:(q)=>({value:data.get(q.includes('password')?'password':'email')||''})});});
   document.addEventListener('click',async event=>{
-    const el=event.target.closest('[data-nav],[data-go-category],[data-filter],[data-open],[data-favorite],[data-detail-fav],[data-close-modal],[data-discover],[data-save-note],[data-reset-filters],[data-start-quiz],[data-quiz-difficulty],[data-quiz-theme],[data-exit-quiz],[data-quiz-option],[data-history-toggle],[data-next-question],[data-daily-answer],[data-share-score],[data-install],[data-clear-data]');
+    const el=event.target.closest('[data-nav],[data-go-category],[data-filter],[data-open],[data-favorite],[data-detail-fav],[data-close-modal],[data-discover],[data-save-note],[data-reset-filters],[data-start-quiz],[data-quiz-difficulty],[data-quiz-theme],[data-exit-quiz],[data-quiz-option],[data-history-toggle],[data-next-question],[data-daily-answer],[data-share-score],[data-install],[data-clear-data],[data-sync-account],[data-logout],[data-import-guest]');
     if(!el)return;
+    if(el.matches('[data-sync-account]')){await syncCloud();notify(accountCloud.status==='online'?'Progression synchronisée !':'Synchronisation indisponible : tes données restent sur cet appareil.');return;}
+    if(el.matches('[data-import-guest]')){await importGuest();return;}
+    if(el.matches('[data-logout]')){if(accountCloud.client){await accountCloud.client.auth.signOut();useGuest();notify('Déconnexion effectuée.');}return;}
     if(el.matches('[data-favorite]')){event.stopPropagation();toggleFavorite(el.dataset.favorite);return;}
     if(el.matches('[data-detail-fav]')){toggleFavorite(el.dataset.detailFav);return;}
     if(el.matches('[data-close-modal]')){if(el.classList.contains('modal-backdrop')&&event.target!==el)return;state.modal=null;render();return;}
@@ -3065,7 +3253,7 @@ window.AROMALAB_QUIZ_BONUS = {"mcqs":[{"id":"concept-01","question":"Quel acteur
     if(el.matches('[data-daily-answer]')){if(dailyPlayed())return;const answer=el.dataset.dailyAnswer;const dailyQ=dailyQuestion();saved.daily[todayKey()]={answer,correct:answer===dailyQ.answer,questionId:dailyQ.id};persist();render();return;}
     if(el.matches('[data-share-score]')){await shareScore();return;}
     if(el.matches('[data-install]')){if(deferredInstall){await deferredInstall.prompt();deferredInstall=null;}else notify('Utilise le menu de ton navigateur : « Ajouter à l’écran d’accueil ».');return;}
-    if(el.matches('[data-clear-data]')){if(confirm('Effacer définitivement tes notes, favoris, découvertes et scores sur cet appareil ?')){saved=emptyStore();persist();state.quiz=null;render();notify('Données locales effacées.');}return;}
+    if(el.matches('[data-clear-data]')){if(confirm('Effacer les données locales de ce profil sur cet appareil ? Si un compte est connecté, la sauvegarde cloud pourra les restaurer.')){saved=emptyStore();persist();state.quiz=null;render();notify('Données locales effacées.');}return;}
     if(el.matches('[data-nav]')){event.preventDefault();navigate(el.dataset.nav);return;}
   });
   document.addEventListener('input',event=>{
@@ -3085,6 +3273,7 @@ window.AROMALAB_QUIZ_BONUS = {"mcqs":[{"id":"concept-01","question":"Quel acteur
   window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;});
   // Application autonome : le contenu et les quiz restent intégrés à ce HTML.
   render();
+  initializeAccount();
 })();
 
 </script>
