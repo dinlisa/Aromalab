@@ -1,5 +1,11 @@
 <!doctype html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="theme-color" content="#193f32"><meta name="description" content="Découvre les arômes du vin et de la bière avec AromaLab : fiches, quiz et défis sensoriels."><title>AromaLab — Le goût de la découverte</title><style>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="theme-color" content="#193f32"><meta name="description" content="Découvre les arômes du vin et de la bière avec AromaLab : fiches, quiz et défis sensoriels."><link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="application-name" content="AromaLab">
+<title>AromaLab — Le goût de la découverte</title><style>
 :root {
   --bg:#f7f7f2;
   --paper:#fffefa;
@@ -2611,7 +2617,7 @@ window.AROMALAB_DATA = {
       <a href="#" data-nav="home" class="brand" aria-label="AromaLab, accueil"><span class="brand-icon">✳</span><span><span class="brand-name">Aroma<span class="brand-dot">Lab</span></span><div class="brand-sub">Le goût de la découverte</div></span></a>
       <div class="side-label">Découvrir</div><nav class="nav-list">${navItems.map(x=>navButton(x)).join('')}</nav>
       <div class="side-spacer"></div><div class="side-tip"><div class="tip-top">🌿 Le conseil du labo</div><p>Pour exercer ton nez, commence par les odeurs du quotidien. Pas besoin de goûter une boisson !</p><button type="button" data-nav="explore">Explorer les arômes ${svg('right')}</button></div>
-      <div class="side-foot">AromaLab · version 1.0</div>
+      <div class="side-foot">AromaLab · version 1.1</div>
     </aside><main class="main" id="main-content"><div class="main-wrap">
       <header class="topbar"><div class="topbar-left">Le petit laboratoire des <strong>grandes découvertes.</strong></div><div class="mobile-logo"><span class="brand-icon">✳</span>AromaLab</div><div class="topbar-right"><span class="top-date">${new Intl.DateTimeFormat('fr-FR',{weekday:'long',day:'numeric',month:'long'}).format(new Date())}</span><span class="top-score" title="Points pédagogiques"> <span class="spark">✦</span> ${totalScore()} pts</span><span class="top-avatar" title="Ton niveau">${currentLevel()}</span></div></header>
       ${body}<div class="footer-note">Fait pour apprendre, sans obligation de consommation. <button type="button" data-nav="about">Sources & confidentialité</button></div>
@@ -2719,8 +2725,18 @@ window.AROMALAB_DATA = {
     if((event.key==='Enter'||event.key===' ')&&event.target.matches('.aroma-card')){event.preventDefault();state.modal=event.target.dataset.open;render();}
   });
   window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;});
-  // Édition autonome : aucun fichier externe ni service worker requis.
+  // Application autonome : le contenu et les quiz restent intégrés à ce HTML.
   render();
 })();
 
-</script></body></html>
+</script>
+<script>
+// Enregistrement non bloquant : si le service worker échoue, AromaLab fonctionne quand même.
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', { scope: './' })
+      .catch(error => console.warn('Mode hors ligne indisponible :', error));
+  });
+}
+</script>
+</body></html>
