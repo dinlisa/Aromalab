@@ -1,4 +1,4 @@
-# AromaLab — Version 1.0 🌿
+# AromaLab — Version 1.1 🌿
 
 Une petite application web **en français** pour explorer les odeurs du quotidien, comprendre quelques molécules aromatiques du vin et de la bière, et apprendre en jouant.
 
